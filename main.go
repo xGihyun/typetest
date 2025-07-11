@@ -13,7 +13,13 @@ import (
 )
 
 func main() {
-	p := tea.NewProgram(initialModel())
+	words, err := getWords(200)
+	if err != nil {
+		log.Fatal(err)
+	}
+	text := strings.Join(words, " ")
+
+	p := tea.NewProgram(initialModel(text))
 	if _, err := p.Run(); err != nil {
 		log.Fatal(err)
 	}
@@ -24,8 +30,6 @@ type model struct {
 	help      help.Model
 	keymap    keymap
 	ghostText string
-	// typedText string
-	// cursorPos int
 }
 
 type keymap struct{}
@@ -40,7 +44,7 @@ func (k keymap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{k.ShortHelp()}
 }
 
-func initialModel() model {
+func initialModel(text string) model {
 	ti := textinput.New()
 	ti.Width = 80
 	ti.Focus()
@@ -52,9 +56,7 @@ func initialModel() model {
 		textInput: ti,
 		help:      h,
 		keymap:    km,
-		ghostText: "The quick brown fox jumps over the lazy dog.",
-		// typedText: "",
-		// cursorPos: 0,
+		ghostText: text,
 	}
 }
 
@@ -122,8 +124,15 @@ func (m model) View() string {
 	ghostRunes := []rune(m.ghostText)
 	typedRunes := []rune(m.textInput.Value())
 	cursorPos := m.textInput.Position()
+	currentLineLength := 0
 
 	for i, ghostChar := range ghostRunes {
+		if currentLineLength >= m.textInput.Width && ghostChar == ' ' {
+			builder.WriteByte('\n')
+			currentLineLength = 0
+			continue
+		}
+
 		if i < len(typedRunes) {
 			typedChar := typedRunes[i]
 			if typedChar == ghostChar {
@@ -139,6 +148,12 @@ func (m model) View() string {
 			} else {
 				builder.WriteString(ghostTextStyle.Render(string(ghostChar)))
 			}
+		}
+
+		if ghostChar == '\n' {
+			currentLineLength = 0
+		} else {
+			currentLineLength++
 		}
 	}
 

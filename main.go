@@ -4,13 +4,17 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/timer"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
+
+const DURATION = time.Second * 30
 
 func main() {
 	words, err := getWords(200)
@@ -26,10 +30,12 @@ func main() {
 }
 
 type model struct {
-	textInput textinput.Model
-	help      help.Model
-	keymap    keymap
-	ghostText string
+	textInput      textinput.Model
+	help           help.Model
+	keymap         keymap
+	ghostText      string
+	wordsPerMinute int
+	timer          timer.Model
 }
 
 type keymap struct{}
@@ -53,15 +59,17 @@ func initialModel(text string) model {
 	km := keymap{}
 
 	return model{
-		textInput: ti,
-		help:      h,
-		keymap:    km,
-		ghostText: text,
+		textInput:      ti,
+		help:           h,
+		keymap:         km,
+		ghostText:      text,
+		timer:          timer.New(DURATION),
+		wordsPerMinute: 0,
 	}
 }
 
 func (m model) Init() tea.Cmd {
-	return textinput.Blink
+	return tea.Batch(textinput.Blink, m.timer.Init())
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -97,6 +105,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			m.ghostText = m.ghostText[:cursorPos] + " " + m.ghostText[cursorPos:]
 		}
+
+	case timer.TickMsg:
+		v := m.textInput.Value()
+		words := float64(len(v)) / 5.0
+		elapsed := DURATION.Seconds() - m.timer.Timeout.Seconds()
+		wpm := words * (60 / elapsed)
+
+		if wpm > 0 {
+			m.wordsPerMinute = int(wpm)
+		}
+
+		m.timer, cmd = m.timer.Update(msg)
+		return m, cmd
 	}
 
 	m.textInput, cmd = m.textInput.Update(msg)
@@ -158,7 +179,9 @@ func (m model) View() string {
 	}
 
 	return fmt.Sprintf(
-		"Type the stuff:\n\n%s\n\n%s",
+		"Type the stuff:\n\n%s\n%d\n\n%s\n\n%s",
+		m.timer.View(),
+		m.wordsPerMinute,
 		builder.String(),
 		m.help.View(m.keymap),
 	)

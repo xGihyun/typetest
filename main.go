@@ -36,6 +36,7 @@ type model struct {
 	ghostText      string
 	wordsPerMinute int
 	timer          timer.Model
+	started        bool
 }
 
 type keymap struct{}
@@ -65,15 +66,17 @@ func initialModel(text string) model {
 		ghostText:      text,
 		timer:          timer.New(DURATION),
 		wordsPerMinute: 0,
+		started:        false,
 	}
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(textinput.Blink, m.timer.Init())
+	return nil
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
+	var initTimerCmd tea.Cmd
 	cursorPos := m.textInput.Position()
 
 	switch msg := msg.(type) {
@@ -99,20 +102,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.textInput.SetCursor(len(newStr))
 
 		case tea.KeyRunes:
-			if m.ghostText[cursorPos] != ' ' {
-				break
+			if m.ghostText[cursorPos] == ' ' {
+				m.ghostText = m.ghostText[:cursorPos] + " " + m.ghostText[cursorPos:]
 			}
 
-			m.ghostText = m.ghostText[:cursorPos] + " " + m.ghostText[cursorPos:]
+			if !m.started {
+				m.started = true
+				initTimerCmd = m.timer.Init()
+			}
 		}
+
+		m.textInput, cmd = m.textInput.Update(msg)
+		return m, tea.Batch(cmd, initTimerCmd)
 
 	case timer.TickMsg:
 		v := m.textInput.Value()
 		words := float64(len(v)) / 5.0
 		elapsed := DURATION.Seconds() - m.timer.Timeout.Seconds()
-		wpm := words * (60 / elapsed)
-
-		if wpm > 0 {
+		if elapsed >= 0.1 {
+			wpm := words * (60 / elapsed)
 			m.wordsPerMinute = int(wpm)
 		}
 
@@ -120,9 +128,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
-	m.textInput, cmd = m.textInput.Update(msg)
-
-	return m, cmd
+	return m, nil
 }
 
 var (

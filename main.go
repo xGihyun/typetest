@@ -14,7 +14,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-const DURATION = time.Second * 30
+const DURATION = time.Second * 10
 
 func main() {
 	words, err := getWords(200)
@@ -37,6 +37,8 @@ type model struct {
 	wordsPerMinute int
 	timer          timer.Model
 	started        bool
+	incorrectCount int
+	accuracy       float32
 }
 
 type keymap struct{}
@@ -67,6 +69,8 @@ func initialModel(text string) model {
 		timer:          timer.New(DURATION),
 		wordsPerMinute: 0,
 		started:        false,
+		incorrectCount: 0,
+		accuracy:       100,
 	}
 }
 
@@ -95,6 +99,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case tea.KeySpace:
+			if m.timer.Timedout() {
+				return m, nil
+			}
+
 			nextWordPos := strings.Index(m.ghostText[cursorPos:], " ")
 			cur := m.textInput.Value()
 			newStr := cur + strings.Repeat(" ", nextWordPos)
@@ -102,8 +110,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.textInput.SetCursor(len(newStr))
 
 		case tea.KeyRunes:
+			if m.timer.Timedout() {
+				return m, nil
+			}
+
 			if m.ghostText[cursorPos] == ' ' {
 				m.ghostText = m.ghostText[:cursorPos] + " " + m.ghostText[cursorPos:]
+			}
+
+			if cursorPos > 0 && m.textInput.Value()[cursorPos-1] != m.ghostText[cursorPos-1] {
+				m.incorrectCount++
 			}
 
 			if !m.started {
@@ -112,10 +128,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		if m.started {
+			m.calculateAccuracy()
+		}
+
 		m.textInput, cmd = m.textInput.Update(msg)
 		return m, tea.Batch(cmd, initTimerCmd)
 
 	case timer.TickMsg:
+		if m.timer.Timedout() {
+			return m, nil
+		}
+
 		v := m.textInput.Value()
 		words := float64(len(v)) / 5.0
 		elapsed := DURATION.Seconds() - m.timer.Timeout.Seconds()
@@ -129,6 +153,27 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+func (m *model) calculateAccuracy() {
+	input := m.textInput.Value()
+	if len(input) <= 0 {
+		return
+	}
+
+	correctCount := 0
+
+	for i := 0; i < len(input); i++ {
+		typedChar := input[i]
+		ghostChar := m.ghostText[i]
+		if typedChar == ghostChar {
+			correctCount++
+		} else {
+			m.incorrectCount++
+		}
+	}
+
+	m.accuracy = (float32(correctCount) / float32(len(input))) * 100
 }
 
 var (
@@ -184,10 +229,17 @@ func (m model) View() string {
 		}
 	}
 
+	if m.timer.Timedout() {
+		m.textInput.Blur()
+		builder.Reset()
+		builder.WriteString(fmt.Sprintf("WPM: %d\nACC: %.2f%%", m.wordsPerMinute, m.accuracy))
+	}
+
 	return fmt.Sprintf(
-		"Type the stuff:\n\n%s\n%d\n\n%s\n\n%s",
+		"Type the stuff:\n\nTIME: %s\nWPM: %d\nACC: %.2f%%\n\n%s\n\n%s",
 		m.timer.View(),
 		m.wordsPerMinute,
+		m.accuracy,
 		builder.String(),
 		m.help.View(m.keymap),
 	)

@@ -39,6 +39,8 @@ type model struct {
 	started        bool
 	incorrectCount int
 	accuracy       float32
+	errorPositions map[int]bool
+	maxTyped       int
 }
 
 type keymap struct{}
@@ -58,19 +60,17 @@ func initialModel(text string) model {
 	ti.Width = 80
 	ti.Focus()
 
-	h := help.New()
-	km := keymap{}
-
 	return model{
 		textInput:      ti,
-		help:           h,
-		keymap:         km,
+		help:           help.New(),
+		keymap:         keymap{},
 		ghostText:      text,
 		timer:          timer.New(DURATION),
 		wordsPerMinute: 0,
 		started:        false,
-		incorrectCount: 0,
 		accuracy:       100,
+		errorPositions: make(map[int]bool),
+		maxTyped:       0,
 	}
 }
 
@@ -118,21 +118,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.ghostText = m.ghostText[:cursorPos] + " " + m.ghostText[cursorPos:]
 			}
 
-			if cursorPos > 0 && m.textInput.Value()[cursorPos-1] != m.ghostText[cursorPos-1] {
-				m.incorrectCount++
-			}
-
 			if !m.started {
 				m.started = true
 				initTimerCmd = m.timer.Init()
 			}
 		}
 
+		m.textInput, cmd = m.textInput.Update(msg)
+
 		if m.started {
 			m.calculateAccuracy()
 		}
 
-		m.textInput, cmd = m.textInput.Update(msg)
 		return m, tea.Batch(cmd, initTimerCmd)
 
 	case timer.TickMsg:
@@ -161,19 +158,19 @@ func (m *model) calculateAccuracy() {
 		return
 	}
 
-	correctCount := 0
-
 	for i := 0; i < len(input); i++ {
 		typedChar := input[i]
 		ghostChar := m.ghostText[i]
-		if typedChar == ghostChar {
-			correctCount++
-		} else {
-			m.incorrectCount++
+		if typedChar != ghostChar {
+			m.errorPositions[i] = true
 		}
 	}
 
-	m.accuracy = (float32(correctCount) / float32(len(input))) * 100
+	if len(input) > m.maxTyped {
+		m.maxTyped = len(input)
+		correct := len(input) - len(m.errorPositions)
+		m.accuracy = (float32(correct) / float32(len(input))) * 100
+	}
 }
 
 var (
@@ -236,7 +233,7 @@ func (m model) View() string {
 	}
 
 	return fmt.Sprintf(
-		"Type the stuff:\n\nTIME: %s\nWPM: %d\nACC: %.2f%%\n\n%s\n\n%s",
+		"Type the stuff:\n\nTIME: %s\nWPM:  %d\nACC:  %.2f%%\n\n%s\n\n%s",
 		m.timer.View(),
 		m.wordsPerMinute,
 		m.accuracy,
